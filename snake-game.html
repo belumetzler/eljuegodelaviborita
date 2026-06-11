@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>SNAKE</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  background: #0d0d0d;
+  width: 100%; height: 100%;
+  overflow: hidden;
+  touch-action: none;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  font-family: 'Courier New', monospace;
+  color: #0f0;
+  gap: 0;
+}
+#title    { font-size: 1.4rem; letter-spacing: 6px; margin-bottom: 4px; }
+#scoreln  { font-size: 0.8rem; color: #0a0; min-height: 1.1em; margin-bottom: 8px; }
+
+#wrap { position: relative; flex-shrink: 0; }
+canvas { display: block; border: 1px solid #0f0; }
+
+#over {
+  position: absolute; inset: 0;
+  background: rgba(0,0,0,0.9);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  text-align: center; padding: 18px;
+}
+#start-msg { font-size: 1rem; letter-spacing: 2px; color: #0f0; }
+
+.bcard {
+  border: 2px solid gold; border-radius: 14px;
+  padding: 16px 18px; background: #1a0a2e;
+  color: #fff; font-family: 'Segoe UI', sans-serif;
+  font-size: 0.9rem; line-height: 2; margin-bottom: 14px;
+}
+.bad     { color: #ff6b6b; font-weight: bold; font-size: 1rem; }
+.details { color: gold; margin-top: 4px; line-height: 2; }
+
+#retry {
+  padding: 9px 22px;
+  border: 1px solid #0f0; background: transparent; color: #0f0;
+  font-family: 'Courier New', monospace; font-size: 0.85rem;
+  letter-spacing: 1px; cursor: pointer; border-radius: 4px;
+  touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+}
+#retry:active { background: rgba(0,255,0,0.15); }
+
+#dpad {
+  display: grid;
+  grid-template-columns: repeat(3, 52px);
+  grid-template-rows: repeat(2, 52px);
+  gap: 5px; margin-top: 10px; flex-shrink: 0;
+}
+.dk {
+  width: 52px; height: 52px;
+  background: rgba(0,255,0,0.07);
+  border: 1px solid rgba(0,255,0,0.25); border-radius: 8px;
+  font-size: 1.2rem; color: #0f0; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+}
+.dk:active { background: rgba(0,255,0,0.22); }
+.dk.x      { visibility: hidden; pointer-events: none; }
+</style>
+</head>
+<body>
+
+<div id="title">🐍 SNAKE</div>
+<div id="scoreln">&nbsp;</div>
+
+<div id="wrap">
+  <canvas id="c"></canvas>
+  <div id="over">
+    <div id="start-msg">TOCÁ PARA EMPEZAR</div>
+  </div>
+</div>
+
+<div id="dpad">
+  <div class="dk x"></div>
+  <div class="dk" data-dx="0"  data-dy="-1">▲</div>
+  <div class="dk x"></div>
+  <div class="dk" data-dx="-1" data-dy="0">◀</div>
+  <div class="dk" data-dx="0"  data-dy="1">▼</div>
+  <div class="dk" data-dx="1"  data-dy="0">▶</div>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+const over   = document.getElementById('over');
+const scoreln = document.getElementById('scoreln');
+
+// Size — guarantee at least 14 cells so the snake has room
+const CELL = 18;
+const avW  = window.innerWidth  - 16;
+const avH  = window.innerHeight - 195;
+const COLS = Math.max(Math.floor(Math.min(avW, avH, 400) / CELL), 14);
+const ROWS = COLS;
+canvas.width  = COLS * CELL;
+canvas.height = ROWS * CELL;
+
+let snake, dir, nextDir, food, score, running, raf, lastT;
+const TICK  = 140;
+let state   = 'idle';
+
+/* ── game core ── */
+function startGame() {
+  state   = 'playing';
+  const cx = Math.floor(COLS / 2), cy = Math.floor(ROWS / 2);
+  snake   = [{x:cx,y:cy}, {x:cx-1,y:cy}, {x:cx-2,y:cy}];
+  dir     = nextDir = {x:1, y:0};
+  food    = mkFood();
+  score   = 0;
+  scoreln.textContent = 'PUNTOS: 0';
+  over.style.display  = 'none';
+  running = true;
+  lastT   = performance.now();   // ← avoids instant first tick
+  if (raf) cancelAnimationFrame(raf);
+  raf = requestAnimationFrame(loop);
+  draw();
+}
+
+function mkFood() {
+  let p;
+  do { p = {x: ri(COLS), y: ri(ROWS)}; }
+  while (snake.some(s => s.x===p.x && s.y===p.y));
+  return p;
+}
+const ri = n => Math.floor(Math.random() * n);
+
+function loop(ts) {
+  if (!running) return;
+  raf = requestAnimationFrame(loop);
+  if (ts - lastT < TICK) return;
+  lastT = ts;
+  tick();
+}
+
+function tick() {
+  dir = nextDir;
+  const h = {x: snake[0].x + dir.x, y: snake[0].y + dir.y};
+  if (h.x<0 || h.x>=COLS || h.y<0 || h.y>=ROWS ||
+      snake.some(s => s.x===h.x && s.y===h.y)) return gameOver();
+  snake.unshift(h);
+  if (h.x===food.x && h.y===food.y) {
+    score++;
+    scoreln.textContent = `PUNTOS: ${score}`;
+    food = mkFood();
+  } else snake.pop();
+  draw();
+}
+
+/* ── render ── */
+function rr(x,y,w,h,r) {
+  ctx.beginPath();
+  if (ctx.roundRect) { ctx.roundRect(x,y,w,h,r); return; }
+  ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y);
+  ctx.arcTo(x+w,y,x+w,y+r,r); ctx.lineTo(x+w,y+h-r);
+  ctx.arcTo(x+w,y+h,x+w-r,y+h,r); ctx.lineTo(x+r,y+h);
+  ctx.arcTo(x,y+h,x,y+h-r,r); ctx.lineTo(x,y+r);
+  ctx.arcTo(x,y,x+r,y,r); ctx.closePath();
+}
+
+function draw() {
+  const W = canvas.width, H = canvas.height;
+  ctx.fillStyle = '#0d0d0d'; ctx.fillRect(0,0,W,H);
+
+  ctx.fillStyle = 'rgba(0,255,0,0.06)';
+  for (let x=0; x<COLS; x++) for (let y=0; y<ROWS; y++)
+    ctx.fillRect(x*CELL+CELL/2-.5, y*CELL+CELL/2-.5, 1, 1);
+
+  const fx=food.x*CELL+CELL/2, fy=food.y*CELL+CELL/2, fr=CELL/2-2;
+  ctx.fillStyle='#d00'; ctx.beginPath(); ctx.arc(fx,fy,fr,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#f88'; ctx.beginPath(); ctx.arc(fx-fr*.35,fy-fr*.35,fr*.3,0,Math.PI*2); ctx.fill();
+
+  snake.forEach((seg,i) => {
+    const t = i / Math.max(snake.length-1, 1);
+    ctx.fillStyle = i===0 ? '#00ff41' : `hsl(${128-t*28},${88-t*18}%,${44-t*14}%)`;
+    rr(seg.x*CELL+1, seg.y*CELL+1, CELL-2, CELL-2, 3);
+    ctx.fill();
+  });
+
+  const hx=snake[0].x*CELL, hy=snake[0].y*CELL;
+  let e1,e2;
+  if      (dir.x===1)  { e1={x:hx+13,y:hy+5};  e2={x:hx+13,y:hy+12}; }
+  else if (dir.x===-1) { e1={x:hx+4,  y:hy+5};  e2={x:hx+4,  y:hy+12}; }
+  else if (dir.y===1)  { e1={x:hx+5,  y:hy+13}; e2={x:hx+12, y:hy+13}; }
+  else                  { e1={x:hx+5,  y:hy+4};  e2={x:hx+12, y:hy+4};  }
+  ctx.fillStyle='#000';
+  [e1,e2].forEach(e => { ctx.beginPath(); ctx.arc(e.x,e.y,1.8,0,Math.PI*2); ctx.fill(); });
+}
+
+/* ── game over ── */
+function gameOver() {
+  state='dead'; running=false; cancelAnimationFrame(raf);
+  over.innerHTML = `
+    <div style="font-size:1rem;color:#0f0;letter-spacing:2px;margin-bottom:12px">— GAME OVER —</div>
+    <div class="bcard">
+      <div class="bad">Sos malísimo en este juego.</div>
+      <div>Tranquilo, de todas formas estás<br>invitado al cumple de Dana:</div>
+      <div class="details">
+        📅 Viernes 17/07/2026<br>
+        🕐 21:00 hs<br>
+        📍 Jano's Ituzaingó 2<br>
+        👔 Elegante
+      </div>
+    </div>
+    <button id="retry">INTENTAR DE NUEVO</button>
+  `;
+  over.style.display = 'flex';
+
+  // bind retry directly — avoids any event interception issues
+  const btn = document.getElementById('retry');
+  btn.addEventListener('touchstart', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    startGame();
+  }, {passive:false});
+  btn.addEventListener('click', e => {
+    e.stopPropagation();
+    startGame();
+  });
+}
+
+/* ── input ── */
+function setDir(dx,dy) {
+  if (state!=='playing') return;
+  if (dx===-dir.x && dy===-dir.y) return;
+  nextDir = {x:dx, y:dy};
+}
+
+// Keyboard
+document.addEventListener('keydown', e => {
+  const m={ArrowUp:[0,-1],ArrowDown:[0,1],ArrowLeft:[-1,0],ArrowRight:[1,0]};
+  const d=m[e.key]; if (!d) return;
+  e.preventDefault();
+  if (state==='idle') startGame(); else setDir(d[0],d[1]);
+});
+
+// Swipe on canvas
+let tx, ty;
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  if (state==='idle') { startGame(); return; }
+  tx=e.touches[0].clientX; ty=e.touches[0].clientY;
+}, {passive:false});
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  if (state!=='playing' || tx==null) return;
+  const dx=e.touches[0].clientX-tx, dy=e.touches[0].clientY-ty;
+  if (Math.abs(dx)<10 && Math.abs(dy)<10) return;
+  Math.abs(dx)>Math.abs(dy) ? setDir(dx>0?1:-1,0) : setDir(0,dy>0?1:-1);
+  tx=e.touches[0].clientX; ty=e.touches[0].clientY;
+}, {passive:false});
+
+// Overlay tap to start
+over.addEventListener('touchstart', e => {
+  if (state!=='idle') return;
+  e.preventDefault();
+  startGame();
+}, {passive:false});
+over.addEventListener('click', () => { if (state==='idle') startGame(); });
+
+// D-pad
+document.querySelectorAll('.dk[data-dx]').forEach(btn => {
+  const dx=+btn.dataset.dx, dy=+btn.dataset.dy;
+  btn.addEventListener('touchstart', e => {
+    e.preventDefault();
+    if (state==='idle') startGame();
+    setDir(dx,dy);
+  }, {passive:false});
+  btn.addEventListener('click', () => {
+    if (state==='idle') startGame();
+    setDir(dx,dy);
+  });
+});
+</script>
+</body>
+</html>
